@@ -1,4 +1,5 @@
 import * as fs from "fs/promises";
+import * as path from "path";
 
 import {createLibp2p} from "libp2p";
 import {tcp} from "@libp2p/tcp";
@@ -8,6 +9,8 @@ import {noise} from "@chainsafe/libp2p-noise";
 import { toString } from "uint8arrays";
 
 import dotenv from 'dotenv';
+import sqlite3 from 'sqlite3'
+import { open } from 'sqlite'
 
 dotenv.config();
 
@@ -35,9 +38,18 @@ dotenv.config();
     };
 
     const files = await fs.readdir('./.peers');
-    const fn = `./.peers/${files.length}.json`;
+    const dir = `./.peers/${files.length}`;
+    await fs.mkdir(dir, {recursive: true});
+    const fn = path.resolve(dir, 'peer.json');
     await fs.writeFile(fn, JSON.stringify(peerId, null, 2));
     console.log('created', fn);
+    const db = await open({
+        filename: path.resolve(dir, 'test.db'),
+        driver: sqlite3.Database,
+        mode: sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE
+    });
+    await db.exec('VACUUM;');
     libp2p.stop();
+    await db.close();
 
 })().catch(console.error)

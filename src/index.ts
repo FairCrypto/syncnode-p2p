@@ -1,45 +1,54 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { execa } from 'execa';
+import type { ExecaChildProcess } from 'execa';
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
-import { createFromJSON } from '@libp2p/peer-id-factory'
 
 // entry point
 
 (async () => {
 
-    const files = await fs.readdir('./.peers');
-    const configs = await Promise.all(
-        files.map(fn => fs.readFile(`./.peers/${fn}`, 'utf-8'))
-    );
-    const peers = await Promise.all(
-        configs
-            .map((data) =>  JSON.parse(data))
-            .map((json) => createFromJSON(json))
-    );
-    const peerIds = await Promise.all(peers.map((peer) => peer.toString()));
-    const sender = Math.floor(Math.random() * peerIds.length);
+    const files = await fs.readdir(path.resolve('.', '.peers'));
 
-    for await (const file of files) {
+    const proc = execa(
+        'tsx',
+        [
+            path.resolve('.', 'src', 'node.ts'),
+            '0',
+        ],
+        {
+            cwd: path.resolve('.', '.peers', '0'),
+            all: true
+        })
+    console.log('SPAWN', 0, proc.pid);
+    proc.all?.on('data', (data) => console.log(uint8ArrayToString(data).replace(/\n/g, '')));
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+    const processes: ExecaChildProcess[] = [];
+
+    for await (const file of files.slice(1)) {
         const proc = execa(
             'tsx',
             [
                 path.resolve('.', 'src', 'node.ts'),
                 files.indexOf(file).toString(),
-                sender.toString(),
-                ...peerIds
             ],
             {
-                cwd: path.resolve('./'),
+                cwd: path.resolve('.', '.peers', file),
                 all: true
             })
-        console.log('STRT', files.indexOf(file), peerIds[files.indexOf(file)], proc.pid);
+        processes.push(proc);
+        console.log('SPAWN', files.indexOf(file), proc.pid);
         proc.all?.on('data', (data) => console.log(uint8ArrayToString(data).replace(/\n/g, '')));
-        // await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
 
+    setTimeout(() => {
+        processes[5].kill(15);
+    }, 20_000)
+
     while (true) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
 
 })().catch(console.error)
