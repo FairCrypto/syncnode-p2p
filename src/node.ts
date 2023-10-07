@@ -284,6 +284,8 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
             libp2p.services.pubsub.publish('peers', new TextEncoder().encode(JSON.stringify(peers)));
         }, 10_000);
     }
+    const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
+    log('HGHT', max_height);
 
     while (true) {
         // log('INFO', peerIdx, 'peers', await libp2p.peerStore.all().then(_ => _.length));
