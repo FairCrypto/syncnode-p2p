@@ -209,7 +209,7 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
         addresses: {
             listen: [`/ip4/0.0.0.0/tcp/${port}`]
         },
-        peerDiscovery: (peerIdx !== '100') ? [
+        peerDiscovery: bootstrapPeers.length > 0 ? [
             bootstrap({
                 list: bootstrapPeers.map((peer, idx) =>
                     `/ip4/${bootstrapHosts[idx]}/tcp/${bootstrapPorts[idx]}/p2p/${peer}`
