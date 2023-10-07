@@ -44,7 +44,7 @@ dotenv.config();
     await fs.writeFile(fn, JSON.stringify(peerId, null, 2));
     console.log('created', fn);
     const db = await open({
-        filename: path.resolve(dir, 'test.db'),
+        filename: path.resolve(dir, 'blockchain.db'),
         driver: sqlite3.Database,
         mode: sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE
     });
