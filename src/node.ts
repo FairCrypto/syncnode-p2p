@@ -17,6 +17,21 @@ import { open } from 'sqlite'
 
 import dotenv from 'dotenv';
 import path from "path";
+import {
+    createBlockchainTableSql,
+    createSysTableSql,
+    getMaxHeightBlockchainSql,
+    getRowBlockchainSql,
+    insertBlockchainSql,
+    // createTestTableSql,
+    // getRowTestSql,
+    insertSysSql,
+    // insertTestSql,
+    selectMaxHeightSysSql,
+    // selectMaxHeightTestSql,
+    // selectTestSql,
+    updateSysSql
+} from "./sql";
 
 dotenv.config();
 debug.enable('node:*');
@@ -29,7 +44,7 @@ const bootstrapPorts = process.env.BOOTSTRAP_PORTS?.split(',') || [];
 const bootstrapPeers = process.env.BOOTSTRAP_PEERS?.split(',') || [];
 
 const BATCH_SIZE = Number(process.env.BATCH_SIZE || '2');
-const DB_LOCATION = process.env.DB_LOCATION || './test.db';
+const DB_LOCATION = process.env.DB_LOCATION || './blockchain.db';
 
 const wait = (s: number) => new Promise((resolve) => setTimeout(resolve, s * 1000));
 
@@ -56,22 +71,6 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
     log('CONN', nodeId, '<->', 'discovered', peerId);
 }
 
-const CREATE_TABLE_SQL = 'CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);';
-const GET_ALL_ROWS_SQL = 'SELECT * FROM test;';
-const GET_ROW_SQL = 'SELECT * FROM test WHERE id = ?;';
-const INSERT_ROW_SQL = 'INSERT INTO test (id, name) VALUES (?, ?) ON CONFLICT DO NOTHING;';
-const CREATE_SYS_TABLE_SQL = `
-        CREATE TABLE IF NOT EXISTS sys(
-        Lock char(1) not null,
-        height INTEGER,
-        constraint PK_T1 PRIMARY KEY (Lock),
-        constraint CK_T1_Locked CHECK (Lock='X')
-    )`;
-const INSERT_SYS_SQL = 'INSERT INTO sys (Lock, height) VALUES ("X",0) ON CONFLICT DO NOTHING;';
-const UPDATE_HEIGHT_SQL = 'UPDATE sys SET height = ?;';
-const SELECT_MAX_HEIGHT_SQL = 'SELECT height FROM sys;';
-const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
-
 // app entry point
 (async () => {
     
@@ -93,8 +92,9 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
         // add options
     }
 
+    /*
     const processIds = async (json: string) => {
-        const data = await db.all(GET_ALL_ROWS_SQL);
+        const data = await db.all(selectTestSql);
         const ids = data.map(_ => _.id).map(Number)
         const offer = JSON.parse(json);
         const diff = offer.filter((id: number) => !ids.includes(id));
@@ -105,11 +105,12 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
             // log(`SEND ${peerIdx} get:`, get);
         }
     }
+     */
 
     const processGet = async (json: string) => {
         const get = JSON.parse(json);
         try {
-            const data1 = await db.all(GET_ROW_SQL, Number(get[0]));
+            const data1 = await db.all(getRowBlockchainSql, Number(get[0]));
             libp2p.services.pubsub.publish('data', new TextEncoder().encode(JSON.stringify(data1)));
             // log(`SEND ${peerIdx} data:`, get);
         } catch (e: any) {
@@ -120,11 +121,11 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
     const processBlockHeight = async (json: string) => {
         const blockHeight = JSON.parse(json);
         try {
-            const [ { max_height = 0 } = {} ] = await db.all(SELECT_MAX_BLOCK_HEIGHT_SQL);
-            if (blockHeight > max_height) {
-                const delta = Math.min(blockHeight - max_height, BATCH_SIZE);
-                const want = Array.from({ length: delta }, (_, i) => max_height + i + 1);
-                log('WANT', want);
+            const [ { height = 0 } = {} ] = await db.all(selectMaxHeightSysSql);
+            if (blockHeight > height) {
+                const delta = Math.min(blockHeight - height, BATCH_SIZE);
+                const want = Array.from({ length: delta }, (_, i) => height + i + 1);
+                log('WANT block_id(s)', want);
                 want.forEach(w => wanted.add(w));
                 libp2p.services.pubsub.publish('get', new TextEncoder().encode(JSON.stringify(want)));
             }
@@ -136,11 +137,26 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
 
     const processData = async (json: string) => {
         const rows = JSON.parse(json);
+        const relevant = rows
+            .filter((row: any) => wanted.has(row.id))
+            .map((row: any) => `block_id: ${row.id} merkle_root: ${row.merkle_root.slice(0, 6)}`)
+            .join(', ');
+        if (relevant.length > 0) {
+            log('DATA', relevant);
+        }
         for await (const row of rows) {
             if (wanted.has(row.id)) {
-                await db.run(INSERT_ROW_SQL, row.id, row.name);
+                await db.run(
+                    insertBlockchainSql,
+                    row.id,
+                    row.timestamp,
+                    row.prev_hash,
+                    row.merkle_root,
+                    row.records_json,
+                    row.block_hash
+                );
                 wanted.delete(row.id);
-                await db.run(UPDATE_HEIGHT_SQL, row.id);
+                await db.run(updateSysSql, row.id);
             }
         }
     }
@@ -151,7 +167,7 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
         if (peersExisting.length < PEER_COUNT) {
             const id = Math.floor(Math.random() * peersAvailable.length);
             if (!peersExisting.includes(peersAvailable[id])) {
-                log('PEER', peerIdx, 'connecting to', peersAvailable[id]);
+                // log('PEER', peerIdx, 'connecting to', peersAvailable[id]);
                 // await connect(libp2p, log)(peerId, peersAvailable[id]);
             }
         }
@@ -163,7 +179,7 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
         switch (message.detail.topic) {
             case 'ids':
                 // check if we have the data ids and calc the diff
-                await processIds(json);
+                // await processIds(json);
                 break;
             case 'get':
                 // see if we have the requested data and send it
@@ -273,10 +289,10 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
         // log('INFO', peerIdx, 'peers', await libp2p.peerStore.all().then(_ => _.length));
 
         try {
-            const [ { max_height = 0 } = {} ] = await db.all(SELECT_MAX_BLOCK_HEIGHT_SQL);
-            const [ { height = 0 } = {} ] = await db.all(SELECT_MAX_HEIGHT_SQL);
+            const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
+            const [ { height = 0 } = {} ] = await db.all(selectMaxHeightSysSql);
             if (max_height > height) {
-                await db.run(UPDATE_HEIGHT_SQL, max_height);
+                await db.run(updateSysSql, max_height);
                 log('HGHT', height, '->', max_height);
             }
             if (peerIdx === '0') {
@@ -290,9 +306,9 @@ const SELECT_MAX_BLOCK_HEIGHT_SQL = 'SELECT MAX(id) as max_height FROM test;';
         } catch (e: any) {
             // error('ERR', peerIdx, e.message);
             if (e.message.includes('no such table')) {
-                await db.exec(CREATE_TABLE_SQL);
-                await db.exec(CREATE_SYS_TABLE_SQL);
-                await db.run(INSERT_SYS_SQL);
+                await db.exec(createBlockchainTableSql);
+                await db.exec(createSysTableSql);
+                await db.run(insertSysSql);
             }
         }
 
