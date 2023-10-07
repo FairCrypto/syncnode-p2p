@@ -50,22 +50,27 @@ const bootstrap0 = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: strin
     }
 }
 
-const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, peerId: string) => {
+const connect = (libp2p: Libp2p, log: debug.Debugger) => async (peer: string, host: string, port: string) => {
     // const listenerMa = multiaddr(`/ip4/${bpHost}/tcp/${bootstrapPorts[idx]}/p2p/${bootstrapPeers[idx]}`);
-    const newNode = await createFromJSON({ id: peerId })
+    const newNode = await createFromJSON({ id: peer });
+    const listenerMa = multiaddr(`/ip4/${host}/tcp/${port}/p2p/${peer}`);
     await libp2p.peerStore.patch(newNode,
         {
-            // multiaddrs: [newNode.multiaddrs[0]]
+            multiaddrs: [ listenerMa ]
         }
     );
-    const conn = await libp2p.dial(newNode);
-    log('CONN', nodeId, '<->', 'discovered', peerId);
+    try {
+        const conn = await libp2p.dial(newNode);
+        log('CONN', '<->', 'discovered', peer.toString());
+    } catch (e: any) {
+        console.log('ERR', peer.toString(), 'connection rejected', e.message);
+    }
 }
 
 // app entry point
 (async () => {
     
-    const [peerIdx] = process.argv.slice(2)
+    const [peerIdx = '0'] = process.argv.slice(2)
 
     const log = debug('node:' + peerIdx);
     const error = debug('node:error:' + peerIdx);
@@ -273,14 +278,23 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
         subscribeToTopics(['ids', 'get', 'data', 'block_height', 'peers']);
     }
 
-    // if (peerIdx === '0') {
-        setInterval(async () => {
-            const peers = libp2p.services.pubsub.getPeers();
-            // const subs = libp2p.services.pubsub.getSubscribers('ids');
-            log('PSUB', peerIdx, peers);
-            libp2p.services.pubsub.publish('peers', new TextEncoder().encode(JSON.stringify(peers)));
-        }, 10_000);
-    // }
+    setInterval(async () => {
+        const peers = libp2p.services.pubsub.getPeers();
+        // const subs = libp2p.services.pubsub.getSubscribers('ids');
+        log('PSUB', peers);
+        if (peers.length < bootstrapPeers.length) {
+            for await (const peer of bootstrapPeers) {
+                if (!peers.map(p => p.toString()).includes(peer)) {
+                    await connect(libp2p, log)(
+                        peer,
+                        bootstrapHosts[bootstrapPeers.indexOf(peer)],
+                        bootstrapPorts[bootstrapPeers.indexOf(peer)]
+                    );
+                }
+            }
+        }
+        libp2p.services.pubsub.publish('peers', new TextEncoder().encode(JSON.stringify(peers)));
+    }, 10_000);
 
     try {
         const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
