@@ -8,8 +8,11 @@ import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
 
 (async () => {
 
+    const nodeIds = process.argv.slice(2);
+
     const files = await fs.readdir(path.resolve('.', '.peers'));
 
+    /*
     const proc = execa(
         'tsx',
         [
@@ -23,24 +26,44 @@ import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
     console.log('SPAWN', 0, proc.pid);
     proc.all?.on('data', (data) => console.log(uint8ArrayToString(data).replace(/\n/g, '')));
     await new Promise((resolve) => setTimeout(resolve, 3_000));
+     */
 
     const processes: ExecaChildProcess[] = [];
 
-    for await (const file of files.slice(1)) {
-        const proc = execa(
-            'tsx',
-            [
-                path.resolve('.', 'src', 'node.ts'),
-                files.indexOf(file).toString(),
-            ],
-            {
-                cwd: path.resolve('.', '.peers', file),
-                all: true
-            })
-        processes.push(proc);
-        console.log('SPAWN', files.indexOf(file), proc.pid);
-        proc.all?.on('data', (data) => console.log(uint8ArrayToString(data).replace(/\n/g, '')));
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const proc = execa(
+        'tsx',
+        [
+            path.resolve('.', 'src', 'node.ts'),
+            '0',
+        ],
+        {
+            cwd: path.resolve('.', '.node'),
+            all: true
+        })
+    processes.push(proc);
+    console.log('SPAWN', 'master', proc.pid);
+    proc.all?.on('data', (data) => console.log(uint8ArrayToString(data).replace(/\n/g, '')));
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+    if (nodeIds.length > 0) {
+        console.log('Launching', nodeIds);
+
+        for await (const file of files.filter((id) => nodeIds.includes(id))) {
+            const proc = execa(
+                'tsx',
+                [
+                    path.resolve('.', 'src', 'node.ts'),
+                    files.indexOf(file).toString(),
+                ],
+                {
+                    cwd: path.resolve('.', '.peers', file),
+                    all: true
+                })
+            processes.push(proc);
+            console.log('SPAWN', files.indexOf(file), proc.pid);
+            proc.all?.on('data', (data) => console.log(uint8ArrayToString(data).replace(/\n/g, '')));
+            await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
     }
 
     // Simulates one of the nodes going offline

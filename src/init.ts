@@ -37,8 +37,7 @@ dotenv.config();
         id: libp2p.peerId.toString()
     };
 
-    const files = await fs.readdir('./.peers');
-    const dir = `./.peers/${files.length}`;
+    const dir = path.resolve('.', '.node');
     await fs.mkdir(dir, {recursive: true});
     const fn = path.resolve(dir, 'peer.json');
     await fs.writeFile(fn, JSON.stringify(peerId, null, 2));

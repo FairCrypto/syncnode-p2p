@@ -3,7 +3,7 @@ import * as path from "path";
 import dotenv from 'dotenv';
 import sqlite3 from 'sqlite3'
 import { open } from 'sqlite'
-import {createBlockchainTableSql, createSysTableSql, insertSysSql, selectMaxHeightSysSql} from "./sql";
+import {createBlockchainTableSql, getMaxHeightBlockchainSql} from "./sql";
 
 dotenv.config();
 
@@ -20,21 +20,8 @@ dotenv.config();
     await db.exec(createBlockchainTableSql);
     console.log('blockchain table created/checked');
 
-    await db.exec(createSysTableSql);
-    console.log('sys table created/checked');
-
-    // await db.run(insertTestSql, ['test']);
-    // await db.run(insertTestSql, ['test2']);
-    // await db.run(insertTestSql, ['test3']);
-    // const res = await db.all('SELECT * FROM test;');
-    // console.log('test data added', res);
-
-    await db.run(insertSysSql);
-    const sys = await db.all(selectMaxHeightSysSql);
-    console.log('sys', sys);
-
-    // const check = await db.all('SELECT * FROM test WHERE id = ?;', 1);
-    // console.log('test check', check);
+    const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
+    console.log('max_height', max_height);
 
     await db.close();
 

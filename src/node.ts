@@ -19,24 +19,15 @@ import dotenv from 'dotenv';
 import path from "path";
 import {
     createBlockchainTableSql,
-    createSysTableSql,
     getMaxHeightBlockchainSql,
     getRowBlockchainSql,
     insertBlockchainSql,
-    // createTestTableSql,
-    // getRowTestSql,
-    insertSysSql,
-    // insertTestSql,
-    selectMaxHeightSysSql,
-    // selectMaxHeightTestSql,
-    // selectTestSql,
-    updateSysSql
 } from "./sql";
 
 dotenv.config();
 debug.enable('node:*');
 
-const host = process.env.HOST || '127.0.0.1';
+// const host = process.env.HOST || '127.0.0.1';
 const port = process.env.PORT || '10330';
 
 const bootstrapHosts = process.env.BOOTSTRAP_HOSTS?.split(',') || [];
@@ -121,13 +112,20 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
     const processBlockHeight = async (json: string) => {
         const blockHeight = JSON.parse(json);
         try {
-            const [ { height = 0 } = {} ] = await db.all(selectMaxHeightSysSql);
-            if (blockHeight > height) {
-                const delta = Math.min(blockHeight - height, BATCH_SIZE);
-                const want = Array.from({ length: delta }, (_, i) => height + i + 1);
-                log('WANT block_id(s)', want);
-                want.forEach(w => wanted.add(w));
-                libp2p.services.pubsub.publish('get', new TextEncoder().encode(JSON.stringify(want)));
+            const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
+            if (blockHeight > max_height) {
+                const delta = Math.min(blockHeight - max_height, BATCH_SIZE);
+                // if (wanted.size < BATCH_SIZE) {
+                    const want = Array.from({length: delta}, (_, i) => max_height + i + 1)
+                        .filter((id: number) => !wanted.has(id));
+                    if (want.length > 0) {
+                        log('WANT block_id(s)', want);
+                        want.forEach(w => wanted.add(w));
+                        libp2p.services.pubsub.publish('get', new TextEncoder().encode(JSON.stringify(want)));
+                    }
+                // }
+            } else {
+                // log('CURR');
             }
             // log(`SEND ${peerIdx} data:`, get);
         } catch (e: any) {
@@ -156,7 +154,6 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
                     row.block_hash
                 );
                 wanted.delete(row.id);
-                await db.run(updateSysSql, row.id);
             }
         }
     }
@@ -212,10 +209,10 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
         addresses: {
             listen: [`/ip4/0.0.0.0/tcp/${port}`]
         },
-        peerDiscovery: (peerIdx !== '0') ? [
+        peerDiscovery: (peerIdx !== '100') ? [
             bootstrap({
                 list: bootstrapPeers.map((peer, idx) =>
-                    `/ip4/${bootstrapHosts[idx]}/tcp/10330/p2p/${peer}`
+                    `/ip4/${bootstrapHosts[idx]}/tcp/${bootstrapPorts[idx]}/p2p/${peer}`
                 )
             })
         ] : undefined,
@@ -276,41 +273,42 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
         subscribeToTopics(['ids', 'get', 'data', 'block_height', 'peers']);
     }
 
-    if (peerIdx === '0') {
+    // if (peerIdx === '0') {
         setInterval(async () => {
             const peers = libp2p.services.pubsub.getPeers();
             // const subs = libp2p.services.pubsub.getSubscribers('ids');
             log('PSUB', peerIdx, peers);
             libp2p.services.pubsub.publish('peers', new TextEncoder().encode(JSON.stringify(peers)));
         }, 10_000);
+    // }
+
+    try {
+        const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
+        log('HGHT', max_height);
+    } catch (e: any) {
+        // error('ERR', peerIdx, e.message);
+        if (e.message.includes('no such table')) {
+            await db.exec(createBlockchainTableSql);
+
+            const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
+            log('HGHT', max_height);
+        }
     }
-    const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
-    log('HGHT', max_height);
 
     while (true) {
         // log('INFO', peerIdx, 'peers', await libp2p.peerStore.all().then(_ => _.length));
 
         try {
             const [ { max_height = 0 } = {} ] = await db.all(getMaxHeightBlockchainSql);
-            const [ { height = 0 } = {} ] = await db.all(selectMaxHeightSysSql);
-            if (max_height > height) {
-                await db.run(updateSysSql, max_height);
-                log('HGHT', height, '->', max_height);
-            }
-            // if (peerIdx === '0') {
-                libp2p.services.pubsub.publish(
-                    'block_height',
-                    new TextEncoder().encode(JSON.stringify(max_height))
-                );
-            // }
-
+            libp2p.services.pubsub.publish(
+                'block_height',
+                new TextEncoder().encode(JSON.stringify(max_height))
+            );
             // log(`SEND ${peerIdx} ids:`, ids);
         } catch (e: any) {
             // error('ERR', peerIdx, e.message);
             if (e.message.includes('no such table')) {
                 await db.exec(createBlockchainTableSql);
-                await db.exec(createSysTableSql);
-                await db.run(insertSysSql);
             }
         }
 
