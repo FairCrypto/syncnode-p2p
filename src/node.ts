@@ -295,12 +295,12 @@ const connect = (libp2p: Libp2p, log: debug.Debugger) => async (nodeId: string, 
                 await db.run(updateSysSql, max_height);
                 log('HGHT', height, '->', max_height);
             }
-            if (peerIdx === '0') {
+            // if (peerIdx === '0') {
                 libp2p.services.pubsub.publish(
                     'block_height',
                     new TextEncoder().encode(JSON.stringify(max_height))
                 );
-            }
+            // }
 
             // log(`SEND ${peerIdx} ids:`, ids);
         } catch (e: any) {

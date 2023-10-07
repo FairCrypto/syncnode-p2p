@@ -43,9 +43,10 @@ import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
         await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
 
-    setTimeout(() => {
-        processes[5].kill(15);
-    }, 20_000)
+    // Simulates one of the nodes going offline
+    // setTimeout(() => {
+    //     processes[5].kill(15);
+    // }, 20_000)
 
     while (true) {
         await new Promise((resolve) => setTimeout(resolve, 1_000));
